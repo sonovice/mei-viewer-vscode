@@ -1,0 +1,20 @@
+# Whitelist: ignore everything by default
+**
+
+# Re-include minimal runtime payload
+!package.json
+!LICENSE
+!extension/logo.png
+!README.md
+
+!dist/host/**
+!dist/webview/**
+
+# Re-exclude test output and sourcemaps
+dist/host/test/**
+dist/**/*.map
+
+# Include only the necessary Verovio runtime files
+!node_modules/verovio/dist/verovio.mjs
+!node_modules/verovio/dist/verovio-module.mjs
+!node_modules/verovio/dist/verovio-toolkit-wasm.js

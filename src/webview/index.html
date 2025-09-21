@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; img-src __CSP__ blob: data:; style-src __CSP__ 'unsafe-inline'; font-src __CSP__; script-src __CSP__ 'nonce-__NONCE__' 'wasm-unsafe-eval';">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MEI Preview</title>
+    <style nonce="__NONCE__">
+        html,
+        body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            background: var(--vscode-editor-background);
+            color: var(--vscode-foreground);
+        }
+
+        #toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            justify-content: space-between;
+            padding: 6px 10px;
+            background: var(--vscode-editor-background);
+            border-bottom: 1px solid var(--vscode-widget-border);
+            flex: 0 0 auto;
+        }
+
+        .toolbar-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .vsc-btn {
+            appearance: none;
+            border: 1px solid var(--vscode-button-border, transparent);
+            background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+            color: var(--vscode-button-foreground);
+            padding: 3px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .vsc-btn:hover {
+            background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+        }
+
+        .vsc-text {
+            color: var(--vscode-foreground);
+            font-size: 12px;
+        }
+
+        #container {
+            flex: 1 1 auto;
+            width: 100%;
+            overflow: hidden;
+            background: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+        }
+
+        #pageIndicator {
+            min-width: 80px;
+            text-align: center;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 140px;
+            height: 4px;
+            background: var(--vscode-editor-inactiveSelectionBackground);
+            border-radius: 999px;
+            outline: none;
+            margin: 0 4px;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--vscode-focusBorder);
+            border: 1px solid var(--vscode-widget-border);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--vscode-focusBorder);
+            border: 1px solid var(--vscode-widget-border);
+        }
+
+        body {
+            background: oklch(98.7% 0.022 95.277);
+        }
+
+        body #container {
+            background: oklch(98.7% 0.022 95.277);
+        }
+
+        svg {
+            display: block;
+            margin: 0 auto;
+            height: auto;
+        }
+    </style>
+    <script nonce="__NONCE__">window.__NONCE__ = '__NONCE__';</script>
+    <script type="module" nonce="__NONCE__" src="__SCRIPT__"></script>
+</head>
+
+<body>
+    <div id="toolbar" role="toolbar" aria-label="MEI pagination and controls">
+        <div class="toolbar-group" aria-label="Pagination controls">
+            <button class="vsc-btn" id="prevPage" title="Previous page" aria-label="Previous page">◀</button>
+            <span class="vsc-text" id="pageIndicator" aria-live="polite">Page 1 / 1</span>
+            <button class="vsc-btn" id="nextPage" title="Next page" aria-label="Next page">▶</button>
+        </div>
+        <div class="toolbar-group" aria-label="Zoom controls">
+            <span class="vsc-text">Scale</span>
+            <input id="scaleRange" type="range" min="20" max="130" step="5" value="40" aria-label="Scale" />
+            <span class="vsc-text" id="scaleLabel">40%</span>
+        </div>
+        <!-- Theme controls removed -->
+    </div>
+    <div id="container" role="document" aria-label="MEI score" tabindex="0"></div>
+
+    <script type="module" nonce="__NONCE__">
+        // Keyboard a11y: Left/Right arrows for pages; +/- for scale
+        document.addEventListener('keydown', (e) => {
+            const prev = document.getElementById('prevPage');
+            const next = document.getElementById('nextPage');
+            const slider = document.getElementById('scaleRange');
+            if (!prev || !next || !slider) return;
+            if (e.key === 'ArrowLeft') { if (prev instanceof HTMLButtonElement) prev.click(); }
+            else if (e.key === 'ArrowRight') { if (next instanceof HTMLButtonElement) next.click(); }
+            else if (e.key === '+' || e.key === '=') {
+                if (slider instanceof HTMLInputElement) {
+                    slider.value = String(Math.min(130, Number(slider.value) + 5));
+                    slider.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            }
+            else if (e.key === '-') {
+                if (slider instanceof HTMLInputElement) {
+                    slider.value = String(Math.max(20, Number(slider.value) - 5));
+                    slider.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            }
+        });
+    </script>
+</body>
+
+</html>

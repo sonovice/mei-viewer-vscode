@@ -1,0 +1,119 @@
+{
+  "name": "mei-viewer",
+  "publisher": "local",
+  "displayName": "MEI Viewer",
+  "description": "Live Preview of MEI files, rendered with Verovio",
+  "version": "1.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sonovice/mei-viewer-vscode.git"
+  },
+  "icon": "extension/logo.png",
+  "galleryBanner": {
+    "color": "#0D2A3E",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": ">=1.70.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "author": "Simon Waloschek",
+  "activationEvents": [
+    "onCustomEditor:mei-viewer.meiPreview",
+    "onCommand:mei-viewer.openPreview",
+    "onLanguage:mei"
+  ],
+  "main": "./dist/host/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "MEI Viewer",
+      "properties": {
+        "meiViewer.enableDebugLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose logging in the MEI Viewer extension and webview."
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "mei",
+        "aliases": [
+          "MEI"
+        ],
+        "extensions": [
+          ".mei"
+        ]
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "mei-viewer.meiPreview",
+        "displayName": "MEI Preview",
+        "selector": [
+          {
+            "filenamePattern": "**/*.mei"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "mei-viewer.openPreview",
+        "title": "Open MEI Preview",
+        "icon": "$(preview)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "mei-viewer.openPreview"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "mei-viewer.openPreview",
+          "when": "resourceExtname == .mei",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "mei-viewer.openPreview",
+          "when": "editorLangId == mei",
+          "group": "navigation@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "bun run compile",
+    "compile": "tsc -p ./ && bun run build:webview && cp ./src/webview/index.html ./dist/webview/index.html",
+    "build:webview": "bun build ./src/webview/bootstrap.ts --outdir=dist/webview --target=browser --format=esm --sourcemap=inline",
+    "watch": "tsc -watch -p ./",
+    "pretest": "bun run compile && bun run lint",
+    "lint": "bunx biome lint --reporter=summary src",
+    "format": "bunx biome format --write .",
+    "test": "bun run compile && vscode-test --config ./.vscode-test.mjs",
+    "package:vsix": "bun run compile && bunx vsce package --allow-missing-repository",
+    "install:vsix": "code --install-extension $(ls *.vsix | tail -n1) --force"
+  },
+  "devDependencies": {
+    "@types/vscode": ">=1.70.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.5.2",
+    "@biomejs/biome": "^2.2.4",
+    "typescript": "^5.9.2",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "latest",
+    "@vscode/vsce": "^3.6.0",
+    "@types/verovio": "^5.1.0"
+  },
+  "dependencies": {
+    "verovio": "^5.6.0"
+  }
+}
