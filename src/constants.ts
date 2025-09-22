@@ -1,5 +1,6 @@
 export const VIEW_TYPE_MEI_PREVIEW = "mei-viewer.meiPreview";
 export const CMD_OPEN_PREVIEW = "mei-viewer.openPreview";
+export const CMD_OPEN_PREVIEW_TO_SIDE = "mei-viewer.openPreviewToSide";
 
 // Persisted settings keys
 export const KEY_SCALE_PERCENT = "meiViewer.scalePercent";

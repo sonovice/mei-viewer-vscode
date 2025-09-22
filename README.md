@@ -10,6 +10,7 @@ Live preview of MEI files rendered with Verovio.
 - Highlight selection from the editor in the preview.
 - Zoom controls; settings are persisted between sessions.
 - Project-specific Verovio settings via `.vscode/mei-viewer.config.js`.
+ - Open the preview to the side via a title bar button on `.mei` files.
 
 ## Quick start
 
@@ -23,9 +24,10 @@ Open an `.mei` file and run “Open MEI Preview” (from the title bar or Comman
 - Some layout-related options are handled automatically by the viewer and ignored from this file:
   - `pageWidth`, `pageHeight`, `pageMarginTop`, `pageMarginBottom`, `pageMarginLeft`, `pageMarginRight`, `scaleToPageSize`, `adjustPageHeight`, `scale`.
 
-## Commands
+## Commands & title bar buttons
 
 - `mei-viewer.openPreview`: Opens the MEI preview for the current file.
+ - `mei-viewer.openPreviewToSide`: Opens the MEI preview in a split to the right.
 
 ## Settings
 

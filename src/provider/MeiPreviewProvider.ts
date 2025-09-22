@@ -497,8 +497,26 @@ const _openOptionsFile = async function (
 			await generateJsConfigContent(extUri, currentOptions),
 		);
 	}
+	// Focus existing visible editor if already open
+	const existing = vscode.window.visibleTextEditors.find(
+		(ed) => ed.document.uri.toString() === configUri.toString(),
+	);
+	if (existing) {
+		await vscode.window.showTextDocument(existing.document, {
+			preview: false,
+			viewColumn: existing.viewColumn,
+			preserveFocus: false,
+		});
+		return;
+	}
+	// If already open in a tab, reveal it; otherwise open to the side
+	const openTab = findOpenTextTab(configUri);
 	const doc = await vscode.workspace.openTextDocument(configUri);
-	await vscode.window.showTextDocument(doc, { preview: false });
+	await vscode.window.showTextDocument(doc, {
+		preview: false,
+		viewColumn: openTab ? openTab.group.viewColumn : vscode.ViewColumn.Beside,
+		preserveFocus: false,
+	});
 };
 
 // Typing augmentation on the prototype for local helpers

@@ -8,6 +8,8 @@ export class UiController {
 	public scalePercent = 40;
 	public isDarkMode: boolean | undefined = false;
 	public lastHighlightedXmlId: string | null = null;
+	private boundMouseMove: ((e: MouseEvent) => void) | null = null;
+	private boundMouseLeave: ((e: MouseEvent) => void) | null = null;
 
 	constructor(private readonly getToolkit: () => VerovioToolkitType | null) {}
 
@@ -77,6 +79,34 @@ export class UiController {
 				capture: true,
 			});
 			this.addHitboxes(svgRoot as unknown as SVGElement);
+
+			// Hover handlers for hitboxes
+			if (this.boundMouseMove) {
+				(svgRoot as SVGSVGElement).removeEventListener(
+					"mousemove",
+					this.boundMouseMove as EventListener,
+					true,
+				);
+			}
+			if (this.boundMouseLeave) {
+				(svgRoot as SVGSVGElement).removeEventListener(
+					"mouseleave",
+					this.boundMouseLeave as EventListener,
+					true,
+				);
+			}
+			this.boundMouseMove = (ev: MouseEvent) => this.onSvgMouseMove(ev);
+			this.boundMouseLeave = () => this.clearHoverBox();
+			(svgRoot as SVGSVGElement).addEventListener(
+				"mousemove",
+				this.boundMouseMove as EventListener,
+				{ capture: true, passive: true },
+			);
+			(svgRoot as SVGSVGElement).addEventListener(
+				"mouseleave",
+				this.boundMouseLeave as EventListener,
+				{ capture: true, passive: true },
+			);
 			// Ensure dynamic stylesheet exists (for cursor and highlight styles)
 			this.ensureDynamicStyle(0);
 		}
@@ -321,6 +351,17 @@ export class UiController {
 		}
 	};
 
+	private onSvgMouseMove = (e: MouseEvent) => {
+		const target = e.target as Element | null;
+		if (!target) return this.clearHoverBox();
+		const rect =
+			(target.closest &&
+				(target.closest("#vrv-hitboxes rect") as SVGRectElement | null)) ||
+			null;
+		if (!rect) return this.clearHoverBox();
+		this.drawHoverBox(rect);
+	};
+
 	private addHitboxes(svgRoot: SVGElement) {
 		const old = svgRoot.querySelector("#vrv-hitboxes");
 		old?.remove();
@@ -425,6 +466,53 @@ export class UiController {
 			overlay.appendChild(r);
 		});
 		contentGroup.appendChild(overlay);
+	}
+
+	private drawHoverBox(hitbox: SVGRectElement) {
+		const svgRoot = this.container?.querySelector("svg");
+		if (!svgRoot) return;
+		const overlay = svgRoot.querySelector(
+			"#vrv-hitboxes",
+		) as SVGGElement | null;
+		if (!overlay) return;
+		const x = Number(hitbox.getAttribute("x")) || 0;
+		const y = Number(hitbox.getAttribute("y")) || 0;
+		const w = Number(hitbox.getAttribute("width")) || 0;
+		const h = Number(hitbox.getAttribute("height")) || 0;
+		const pad = 80; // Align with vrv-cross-center logic default padding
+		const cx = x - pad;
+		const cy = y - pad;
+		const cw = w + pad * 2;
+		const ch = h + pad * 2;
+		let hover = overlay.querySelector(
+			"#vrv-hover-box",
+		) as SVGRectElement | null;
+		if (!hover) {
+			hover = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+			hover.setAttribute("id", "vrv-hover-box");
+			hover.setAttribute("pointer-events", "none");
+			overlay.appendChild(hover);
+		}
+		hover.setAttribute("x", String(cx));
+		hover.setAttribute("y", String(cy));
+		hover.setAttribute("width", String(cw));
+		hover.setAttribute("height", String(ch));
+		// Use inline styles (CSS properties) so they override any stylesheet rules
+		// Also keep stroke width stable regardless of page transforms
+		(hover as unknown as SVGGraphicsElement).style.fill = "none";
+		(hover as unknown as SVGGraphicsElement).style.stroke = "#2BD1E4";
+		(hover as unknown as SVGGraphicsElement).style.strokeWidth = "1.6px";
+		(hover as unknown as SVGGraphicsElement).style.mixBlendMode = "multiply";
+		(hover as unknown as SVGGraphicsElement).style.vectorEffect =
+			"non-scaling-stroke";
+	}
+
+	private clearHoverBox() {
+		const svgRoot = this.container?.querySelector("svg");
+		if (!svgRoot) return;
+		const overlay = svgRoot.querySelector("#vrv-hitboxes");
+		if (!overlay) return;
+		overlay.querySelector("#vrv-hover-box")?.remove();
 	}
 
 	private getBBoxInTargetSpace(

@@ -24,6 +24,7 @@
   "activationEvents": [
     "onCustomEditor:mei-viewer.meiPreview",
     "onCommand:mei-viewer.openPreview",
+    "onCommand:mei-viewer.openPreviewToSide",
     "onLanguage:mei"
   ],
   "main": "./dist/host/extension.js",
@@ -66,12 +67,20 @@
         "command": "mei-viewer.openPreview",
         "title": "Open MEI Preview",
         "icon": "$(preview)"
+      },
+      {
+        "command": "mei-viewer.openPreviewToSide",
+        "title": "Open MEI Preview to the Side",
+        "icon": "$(music)"
       }
     ],
     "menus": {
       "commandPalette": [
         {
           "command": "mei-viewer.openPreview"
+        },
+        {
+          "command": "mei-viewer.openPreviewToSide"
         }
       ],
       "explorer/context": [
@@ -79,12 +88,17 @@
           "command": "mei-viewer.openPreview",
           "when": "resourceExtname == .mei",
           "group": "navigation@1"
+        },
+        {
+          "command": "mei-viewer.openPreviewToSide",
+          "when": "resourceExtname == .mei",
+          "group": "navigation@2"
         }
       ],
       "editor/title": [
         {
-          "command": "mei-viewer.openPreview",
-          "when": "editorLangId == mei",
+          "command": "mei-viewer.openPreviewToSide",
+          "when": "resourceExtname == .mei && activeCustomEditorId != mei-viewer.meiPreview",
           "group": "navigation@1"
         }
       ]
