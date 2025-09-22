@@ -3,17 +3,28 @@ import * as path from "node:path";
 import { VIEW_TYPE_MEI_PREVIEW, KEY_SCALE_PERCENT } from "../constants";
 import type { WebviewOutboundMessage, InitMessage } from "../shared/messages";
 
-// Lazy-load ESM-only yaml via dynamic import to work in CJS extension host
+// Lazy-load YAML: prefer vendored bundle inside the extension, fallback to package
 async function importYaml(): Promise<{
 	parse: (src: string) => unknown;
 	stringify: (val: unknown) => string;
 }> {
-	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-	const mod: typeof import("yaml") = (await import(
-		"yaml"
-	)) as unknown as typeof import("yaml");
-	// yaml v2 exposes named exports parse/stringify
-	return { parse: (mod as any).parse, stringify: (mod as any).stringify };
+	try {
+		// dist/host/provider/ -> dist/host/vendor/yaml.mjs
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const mod: any = await import(
+			path.join(__dirname, "..", "vendor", "yaml.mjs")
+		);
+		const y = mod && (mod.default ?? mod);
+		if (y?.parse && y?.stringify)
+			return { parse: y.parse, stringify: y.stringify };
+	} catch {}
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const mod: any = await import("yaml");
+		return { parse: mod.parse, stringify: mod.stringify };
+	} catch (err) {
+		throw err;
+	}
 }
 
 export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
@@ -322,39 +333,31 @@ async function fileExists(uri: vscode.Uri): Promise<boolean> {
 	}
 }
 
-async function generateJsConfigContent(
+async function generateYamlConfigContent(
 	extUri: vscode.Uri,
 	currentOptions: Record<string, unknown> | undefined,
 ): Promise<Uint8Array> {
-	const header = `# MEI Viewer / Verovio options
-# This file defines project-level options for the Verovio toolkit.
-# It is loaded by the MEI Viewer extension if present.
-#
-# Provide key-value pairs which will be passed to VerovioToolkit.setOptions().
-#
-# Lines starting with # are comments.
-# Remove # to enable an option and set its value.
-\n`;
+	// Static header; full documentation/comments are generated per option below
+	const header = `# MEI Viewer / Verovio options\n`;
 
-	let dtsText = "";
-	try {
-		const dtsUri = vscode.Uri.joinPath(
-			extUri,
-			"node_modules",
-			"@types",
-			"verovio",
-			"VerovioOptions.d.ts",
-		);
-		const buff = await vscode.workspace.fs.readFile(dtsUri);
-		dtsText = Buffer.from(buff).toString("utf8");
-	} catch {}
-
+	// Load catalog of options (built at compile time)
 	type Entry = {
 		name: string;
 		doc: string;
 		meta: { default?: string; min?: string; max?: string };
 	};
-	const entries: Entry[] = [];
+	let entries: Entry[] = [];
+	try {
+		const catUri = vscode.Uri.joinPath(
+			extUri,
+			"dist",
+			"host",
+			"options-catalog.json",
+		);
+		const buff = await vscode.workspace.fs.readFile(catUri);
+		entries = JSON.parse(Buffer.from(buff).toString("utf8")) as Entry[];
+	} catch {}
+
 	const excluded = new Set<string>([
 		"pageWidth",
 		"pageHeight",
@@ -366,40 +369,78 @@ async function generateJsConfigContent(
 		"adjustPageHeight",
 		"scale",
 	]);
-	if (dtsText) {
-		// Capture only the JSDoc body (group 1) and the following property name (group 2)
-		const re = /\/\*\*([\s\S]*?)\*\/\s*([a-zA-Z0-9_]+)\?:/g;
-		while (true) {
-			const m = re.exec(dtsText);
-			if (!m) break;
-			const blockDoc = m[1];
-			const name = m[2];
-			const lines = blockDoc
-				.split("\n")
-				.map((l) => l.replace(/^\s*\*\s?/, "").trim());
-			const docLines = lines.filter((l) => !/^(default|min|max)\s*:/i.test(l));
-			const doc = docLines.join(" ").trim();
-			const meta: Entry["meta"] = {};
-			const def = blockDoc.match(/default:\s*([^\n*]+)/i);
-			const min = blockDoc.match(/min:\s*([^\n*]+)/i);
-			const max = blockDoc.match(/max:\s*([^\n*]+)/i);
-			if (def) meta.default = def[1].trim();
-			if (min) meta.min = min[1].trim();
-			if (max) meta.max = max[1].trim();
-			if (!excluded.has(name)) entries.push({ name, doc, meta });
-		}
+	if (entries.length) {
+		entries = entries.filter((e) => !excluded.has(e.name));
 	}
 
 	const { stringify } = await importYaml();
 
+	function normalizeDocLines(rawDoc: string): string[] {
+		const src = rawDoc.replace(/\r\n/g, "\n");
+		const lines = src.split("\n");
+		const out: string[] = [];
+		let i = 0;
+		const isBanner = (s: string) => /^\*{5,}\s*$/.test(s.trim());
+		while (i < lines.length) {
+			const line = lines[i].replace(/^\s*\*\s?/, "").trim();
+			if (isBanner(line)) {
+				// Collect title between banners, ignoring extra blank lines
+				let j = i + 1;
+				while (j < lines.length && lines[j].trim() === "") j++;
+				let title = (lines[j] ?? "").replace(/^\s*\*\s?/, "").trim();
+				// Strip trailing ' *' from title if present
+				title = title.replace(/\s*\*\s*$/, "");
+				// Skip to next non-empty after title
+				j++;
+				while (j < lines.length && lines[j].trim() === "") j++;
+				const bottom =
+					j < lines.length ? lines[j].replace(/^\s*\*\s?/, "").trim() : "";
+				if (isBanner(bottom) && title) {
+					const stars = "*".repeat(title.length);
+					out.push(stars);
+					out.push(title);
+					out.push(stars);
+					out.push("");
+					i = j + 1;
+					continue;
+				}
+			}
+			// Normal line
+			out.push(line);
+			i++;
+		}
+		// Collapse multiple empty lines
+		const collapsed: string[] = [];
+		for (const l of out) {
+			if (l === "" && collapsed[collapsed.length - 1] === "") continue;
+			collapsed.push(l);
+		}
+		return collapsed;
+	}
+
 	const current = currentOptions ?? {};
 	const lines: string[] = [];
 	for (const e of entries) {
-		if (e.doc) lines.push(`# ${e.doc}`);
+		if (e.doc) {
+			const docLines = normalizeDocLines(e.doc);
+			// Ensure two blank lines before a banner block
+			if (docLines.length && /^\*{5,}\s*$/.test(docLines[0])) {
+				let blanks = 0;
+				for (let k = lines.length - 1; k >= 0 && lines[k] === ""; k--) blanks++;
+				while (blanks < 2) {
+					lines.push("");
+					blanks++;
+				}
+			}
+			for (const dl of docLines) {
+				if (dl) lines.push(`# ${dl}`);
+				else lines.push("");
+			}
+		}
 		const metaBits = [
-			e.meta.default ? `default: ${e.meta.default}` : "",
-			e.meta.min ? `min: ${e.meta.min}` : "",
-			e.meta.max ? `max: ${e.meta.max}` : "",
+			e.meta?.default ? `default: ${e.meta.default}` : "",
+			e.meta?.min ? `min: ${e.meta.min}` : "",
+			e.meta?.max ? `max: ${e.meta.max}` : "",
 		].filter(Boolean);
 		if (metaBits.length) lines.push(`# ${metaBits.join("; ")}`);
 		if (Object.hasOwn(current, e.name)) {
@@ -494,7 +535,7 @@ const _openOptionsFile = async function (
 			ext?.extensionUri ?? vscode.Uri.file(path.dirname(__dirname));
 		await vscode.workspace.fs.writeFile(
 			configUri,
-			await generateJsConfigContent(extUri, currentOptions),
+			await generateYamlConfigContent(extUri, currentOptions),
 		);
 	}
 	// Focus existing visible editor if already open

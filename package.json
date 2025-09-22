@@ -3,7 +3,7 @@
   "publisher": "simon-waloschek",
   "displayName": "MEI Viewer",
   "description": "Live Preview of MEI files, rendered with Verovio",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -106,8 +106,10 @@
   },
   "scripts": {
     "vscode:prepublish": "bun run compile",
-    "compile": "tsc -p ./ && bun run build:webview && cp ./src/webview/index.html ./dist/webview/index.html",
+    "compile": "tsc -p ./ && bun run build:webview && bun run build:vendor && bun run build:catalog && cp ./src/webview/index.html ./dist/webview/index.html",
     "build:webview": "bun build ./src/webview/bootstrap.ts --outdir=dist/webview --target=browser --format=esm --sourcemap=inline",
+    "build:vendor": "mkdir -p dist/host/vendor && bun build node_modules/yaml/dist/index.js --outfile=dist/host/vendor/yaml.mjs --target=node --format=esm",
+    "build:catalog": "bun x tsx ./scripts/build-options-catalog.ts",
     "watch": "tsc -watch -p ./",
     "pretest": "bun run compile && bun run lint",
     "lint": "bunx biome lint --reporter=summary src",

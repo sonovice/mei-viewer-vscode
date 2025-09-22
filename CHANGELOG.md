@@ -5,6 +5,11 @@ All notable changes to the "mei-viewer" extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2025-09-23
+
+### Fixed
+- Packaged extension bundles a vendored `yaml.mjs` to avoid module resolution issues in some environments.
+
 ## [1.2.1] - 2025-09-22
 
 ### Fixed
