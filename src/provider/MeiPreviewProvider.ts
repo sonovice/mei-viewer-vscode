@@ -2,7 +2,19 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import { VIEW_TYPE_MEI_PREVIEW, KEY_SCALE_PERCENT } from "../constants";
 import type { WebviewOutboundMessage, InitMessage } from "../shared/messages";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+
+// Lazy-load ESM-only yaml via dynamic import to work in CJS extension host
+async function importYaml(): Promise<{
+	parse: (src: string) => unknown;
+	stringify: (val: unknown) => string;
+}> {
+	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+	const mod: typeof import("yaml") = (await import(
+		"yaml"
+	)) as unknown as typeof import("yaml");
+	// yaml v2 exposes named exports parse/stringify
+	return { parse: (mod as any).parse, stringify: (mod as any).stringify };
+}
 
 export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
 	constructor(private readonly context: vscode.ExtensionContext) {}
@@ -378,6 +390,8 @@ async function generateJsConfigContent(
 		}
 	}
 
+	const { stringify } = await importYaml();
+
 	const current = currentOptions ?? {};
 	const lines: string[] = [];
 	for (const e of entries) {
@@ -394,7 +408,7 @@ async function generateJsConfigContent(
 				Array.isArray(value) ||
 				(value !== null && typeof value === "object")
 			) {
-				let rendered = stringifyYaml(value);
+				let rendered = stringify(value);
 				if (rendered.endsWith("\n")) rendered = rendered.slice(0, -1);
 				const indented = rendered
 					.split("\n")
@@ -404,7 +418,7 @@ async function generateJsConfigContent(
 			} else {
 				let rendered = "";
 				try {
-					rendered = stringifyYaml(value).trim();
+					rendered = stringify(value).trim();
 				} catch {
 					rendered = JSON.stringify(value);
 				}
@@ -421,7 +435,7 @@ async function generateJsConfigContent(
 		const filtered = Object.fromEntries(
 			Object.entries(currentOptions ?? {}).filter(([k]) => !excluded.has(k)),
 		);
-		const body = stringifyYaml(filtered);
+		const body = stringify(filtered);
 		return new TextEncoder().encode(header + (body || ""));
 	}
 
@@ -444,7 +458,8 @@ async function readYamlOptions(uri: vscode.Uri): Promise<unknown> {
 	const srcBuff = await vscode.workspace.fs.readFile(uri);
 	const src = Buffer.from(srcBuff).toString("utf8");
 	try {
-		return parseYaml(src) as unknown;
+		const { parse } = await importYaml();
+		return parse(src) as unknown;
 	} catch {
 		return undefined;
 	}
