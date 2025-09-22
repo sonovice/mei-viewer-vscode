@@ -9,7 +9,7 @@ Live preview of MEI files rendered with Verovio.
 - Click elements in the preview to jump to the corresponding `xml:id` in the source.
 - Highlight selection from the editor in the preview.
 - Zoom controls; settings are persisted between sessions.
-- Project-specific Verovio settings via `.vscode/mei-viewer.config.js`.
+- Project-specific Verovio settings via `.vscode/mei-viewer.config.yaml`.
  - Open the preview to the side via a title bar button on `.mei` files.
 
 ## Quick start

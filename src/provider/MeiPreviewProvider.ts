@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import * as vm from "node:vm";
 import * as path from "node:path";
 import { VIEW_TYPE_MEI_PREVIEW, KEY_SCALE_PERCENT } from "../constants";
 import type { WebviewOutboundMessage, InitMessage } from "../shared/messages";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
 	constructor(private readonly context: vscode.ExtensionContext) {}
@@ -55,11 +55,11 @@ export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
 			},
 		);
 
-		// When any config JS file is saved, broadcast updates to all matching panels
+		// When any config YAML file is saved, broadcast updates to all matching panels
 		const saveSub = vscode.workspace.onDidSaveTextDocument(async (doc) => {
 			try {
 				if (!doc || !doc.uri) return;
-				if (!/mei-viewer\.config\.js$/i.test(doc.uri.fsPath)) return;
+				if (!/mei-viewer\.config\.ya?ml$/i.test(doc.uri.fsPath)) return;
 				await provider.broadcastProjectOptions(doc.uri);
 			} catch {}
 		});
@@ -126,13 +126,13 @@ export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
 			? vscode.Uri.joinPath(
 					workspaceFolder.uri,
 					".vscode",
-					"mei-viewer.config.js",
+					"mei-viewer.config.yaml",
 				)
 			: vscode.Uri.file(
 					path.join(
 						path.dirname(document.uri.fsPath),
 						".vscode",
-						"mei-viewer.config.js",
+						"mei-viewer.config.yaml",
 					),
 				);
 		const projectOptions = await this.loadProjectOptions(configUri);
@@ -314,15 +314,14 @@ async function generateJsConfigContent(
 	extUri: vscode.Uri,
 	currentOptions: Record<string, unknown> | undefined,
 ): Promise<Uint8Array> {
-	const header = `// MEI Viewer / Verovio options
-// This file defines project-level options for the Verovio toolkit.
-// It is loaded by the MEI Viewer extension if present.
-//
-// Export either an object or a function returning an object.
-// The returned keys are passed to VerovioToolkit.setOptions().
-//
-// Lines starting with // are examples and will be ignored.
-// Remove // to enable an option and set its value.
+	const header = `# MEI Viewer / Verovio options
+# This file defines project-level options for the Verovio toolkit.
+# It is loaded by the MEI Viewer extension if present.
+#
+# Provide key-value pairs which will be passed to VerovioToolkit.setOptions().
+#
+# Lines starting with # are comments.
+# Remove # to enable an option and set its value.
 \n`;
 
 	let dtsText = "";
@@ -382,76 +381,52 @@ async function generateJsConfigContent(
 	const current = currentOptions ?? {};
 	const lines: string[] = [];
 	for (const e of entries) {
-		if (e.doc) lines.push(`  // ${e.doc}`);
+		if (e.doc) lines.push(`# ${e.doc}`);
 		const metaBits = [
 			e.meta.default ? `default: ${e.meta.default}` : "",
 			e.meta.min ? `min: ${e.meta.min}` : "",
 			e.meta.max ? `max: ${e.meta.max}` : "",
 		].filter(Boolean);
-		if (metaBits.length) lines.push(`  // ${metaBits.join("; ")}`);
+		if (metaBits.length) lines.push(`# ${metaBits.join("; ")}`);
 		if (Object.hasOwn(current, e.name)) {
-			lines.push(
-				`  ${e.name}: ${JSON.stringify((current as Record<string, unknown>)[e.name])},`,
-			);
+			const value = (current as Record<string, unknown>)[e.name];
+			if (
+				Array.isArray(value) ||
+				(value !== null && typeof value === "object")
+			) {
+				let rendered = stringifyYaml(value);
+				if (rendered.endsWith("\n")) rendered = rendered.slice(0, -1);
+				const indented = rendered
+					.split("\n")
+					.map((l) => (l.length ? `  ${l}` : "  "))
+					.join("\n");
+				lines.push(`${e.name}:\n${indented}`);
+			} else {
+				let rendered = "";
+				try {
+					rendered = stringifyYaml(value).trim();
+				} catch {
+					rendered = JSON.stringify(value);
+				}
+				lines.push(`${e.name}: ${rendered}`);
+			}
 		} else {
-			lines.push(`  // ${e.name}: /* set value here */,`);
+			lines.push(`# ${e.name}: <set value>`);
 		}
 		lines.push("");
 	}
 
-	// Fallback: if no entries parsed, just dump current options
+	// Fallback: if no entries parsed, just dump current options as YAML
 	if (!entries.length) {
-		const body = `
-/**
- * @returns {import('@types/verovio/VerovioOptions').VerovioOptions}
- */
-module.exports = function getVerovioOptions() {
-  return ${JSON.stringify(
-		Object.fromEntries(
+		const filtered = Object.fromEntries(
 			Object.entries(currentOptions ?? {}).filter(([k]) => !excluded.has(k)),
-		),
-		null,
-		2,
-	)};
-}
-`;
-		return new TextEncoder().encode(header + body);
+		);
+		const body = stringifyYaml(filtered);
+		return new TextEncoder().encode(header + (body || ""));
 	}
 
-	const body = `
-/**
- * @returns {import('@types/verovio/VerovioOptions').VerovioOptions}
- */
-module.exports = function getVerovioOptions() {
-  return {
-${lines.join("\n")}
-  };
-}
-`;
+	const body = `${lines.join("\n")}`;
 	return new TextEncoder().encode(header + body);
-}
-
-async function readJsModuleExport(uri: vscode.Uri): Promise<unknown> {
-	const srcBuff = await vscode.workspace.fs.readFile(uri);
-	let src = Buffer.from(srcBuff).toString("utf8");
-	// Allow ESM default export by a minimal transform to CommonJS for vm
-	if (/\bexport\s+default\s+/.test(src)) {
-		src = src.replace(/\bexport\s+default\s+/g, "module.exports = ");
-	}
-	const sandbox: Record<string, unknown> = {
-		module: { exports: {} },
-		exports: {},
-	};
-	const context = vm.createContext(sandbox);
-	const script = new vm.Script(src, { filename: uri.fsPath });
-	script.runInContext(context);
-	const mod = sandbox.module as { exports: unknown };
-	const exp =
-		(mod && (mod as { exports?: unknown }).exports) ?? sandbox.exports;
-	if (exp && typeof (exp as { default?: unknown }).default === "function") {
-		return (exp as { default: () => unknown }).default();
-	}
-	return typeof exp === "function" ? (exp as () => unknown)() : exp;
 }
 
 // Reserved for future support of JSON/JSONC config files
@@ -465,14 +440,24 @@ async function readJsModuleExport(uri: vscode.Uri): Promise<unknown> {
 //     }
 // }
 
-// Load project options from config JS in .vscode. Supports default export or module.exports.
+async function readYamlOptions(uri: vscode.Uri): Promise<unknown> {
+	const srcBuff = await vscode.workspace.fs.readFile(uri);
+	const src = Buffer.from(srcBuff).toString("utf8");
+	try {
+		return parseYaml(src) as unknown;
+	} catch {
+		return undefined;
+	}
+}
+
+// Load project options from YAML config in .vscode.
 const _loadProjectOptions = async function (
 	this: MeiPreviewProvider,
 	configUri: vscode.Uri,
 ): Promise<Record<string, unknown> | null> {
 	try {
 		if (!(await fileExists(configUri))) return null;
-		const val = (await readJsModuleExport(configUri)) as unknown;
+		const val = (await readYamlOptions(configUri)) as unknown;
 		if (val && typeof val === "object") return val as Record<string, unknown>;
 		return null;
 	} catch (err) {

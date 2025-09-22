@@ -28,12 +28,12 @@ declare module "../provider/MeiPreviewProvider" {
 }
 
 suite("Project options config", () => {
-	test("loads CommonJS options file", async () => {
-		const root = tmpPath(`cjs-${Date.now()}`);
+	test("loads YAML options file", async () => {
+		const root = tmpPath(`yaml-${Date.now()}`);
 		const vsdir = path.join(root, ".vscode");
 		await ensureDir(vsdir);
-		const cfg = path.join(vsdir, "mei-viewer.config.js");
-		const body = `module.exports = function(){ return { breaks: "none", spacingStaff: 17 } }`;
+		const cfg = path.join(vsdir, "mei-viewer.config.yaml");
+		const body = `breaks: none\nspacingStaff: 17\n`;
 		await fs.writeFile(cfg, body, "utf8");
 		const provider = new MeiPreviewProvider(
 			{} as unknown as vscode.ExtensionContext,
@@ -44,12 +44,12 @@ suite("Project options config", () => {
 		assert.strictEqual((out as AnyRecord).spacingStaff, 17);
 	});
 
-	test("loads ESM default export options file", async () => {
-		const root = tmpPath(`esm-${Date.now()}`);
+	test("loads YAML options file with different keys", async () => {
+		const root = tmpPath(`yaml2-${Date.now()}`);
 		const vsdir = path.join(root, ".vscode");
 		await ensureDir(vsdir);
-		const cfg = path.join(vsdir, "mei-viewer.config.js");
-		const body = `export default function(){ return { breaks: "line", spacingSystem: 9 } }`;
+		const cfg = path.join(vsdir, "mei-viewer.config.yaml");
+		const body = `breaks: line\nspacingSystem: 9\n`;
 		await fs.writeFile(cfg, body, "utf8");
 		const provider = new MeiPreviewProvider(
 			{} as unknown as vscode.ExtensionContext,
@@ -64,7 +64,7 @@ suite("Project options config", () => {
 		const root = tmpPath(`gen-${Date.now()}`);
 		const vsdir = path.join(root, ".vscode");
 		await ensureDir(vsdir);
-		const cfg = path.join(vsdir, "mei-viewer.config.js");
+		const cfg = path.join(vsdir, "mei-viewer.config.yaml");
 		const provider = new MeiPreviewProvider(
 			{} as unknown as vscode.ExtensionContext,
 		);
@@ -101,13 +101,41 @@ suite("Project options config", () => {
 			assert.ok(!text.includes(k + ":"), `should not include ${k}`);
 		}
 		assert.ok(text.includes("spacingStaff"), "should include non-excluded key");
-		// Must be CommonJS
+		// Should be YAML, not JS
 		assert.ok(
-			text.includes("module.exports"),
-			"generated file should use CommonJS",
+			text.startsWith("# MEI Viewer"),
+			"should start with YAML comments",
+		);
+		assert.ok(
+			!text.includes("module.exports"),
+			"should not contain JS exports",
 		);
 		// Comments should not contain property signatures like '?:'
 		assert.ok(!text.includes("?:"), "comments should not contain '?:'");
+	});
+
+	test("generator formats array values on new lines under key", async () => {
+		const root = tmpPath(`array-${Date.now()}`);
+		const vsdir = path.join(root, ".vscode");
+		await ensureDir(vsdir);
+		const cfg = path.join(vsdir, "mei-viewer.config.yaml");
+		const provider = new MeiPreviewProvider(
+			{} as unknown as vscode.ExtensionContext,
+		);
+		const current: AnyRecord = {
+			handwrittenFont: ["Petaluma"],
+		};
+		await provider.openOptionsFile(
+			vscode.Uri.file(cfg),
+			current as Record<string, unknown>,
+		);
+		const text = await fs.readFile(cfg, "utf8");
+		// Should be either block list or JSON array string, but not inline '- item' on same line
+		assert.ok(
+			/handwrittenFont:\n\s*-\s*Petaluma/.test(text) ||
+				/handwrittenFont:\s*\[\s*"Petaluma"\s*\]/.test(text),
+			"handwrittenFont should be a YAML list or JSON-style array",
+		);
 	});
 
 	test("resolveCustomEditor sends init with projectOptions and reacts to save broadcast", async () => {
@@ -115,12 +143,8 @@ suite("Project options config", () => {
 		const root = tmpPath(`init-${Date.now()}`);
 		const vsdir = path.join(root, ".vscode");
 		await ensureDir(vsdir);
-		const cfg = path.join(vsdir, "mei-viewer.config.js");
-		await fs.writeFile(
-			cfg,
-			'module.exports = function(){ return { breaks: "none" } }',
-			"utf8",
-		);
+		const cfg = path.join(vsdir, "mei-viewer.config.yaml");
+		await fs.writeFile(cfg, `breaks: none\n`, "utf8");
 
 		const meiPath = path.join(root, "sample.mei");
 		await fs.writeFile(
@@ -201,11 +225,7 @@ suite("Project options config", () => {
 				trackPanel(panel: vscode.WebviewPanel, uri: vscode.Uri): void;
 			}
 		).trackPanel(fakePanel, vscode.Uri.file(cfg));
-		await fs.writeFile(
-			cfg,
-			'module.exports = function(){ return { breaks: "line" } }',
-			"utf8",
-		);
+		await fs.writeFile(cfg, `breaks: line\n`, "utf8");
 		await (
 			provider as unknown as {
 				broadcastProjectOptions(uri: vscode.Uri): Promise<void>;
