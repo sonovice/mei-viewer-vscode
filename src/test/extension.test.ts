@@ -11,6 +11,18 @@ suite("MEI Viewer Integration", () => {
 		assert.ok(true);
 	});
 
+	test("contributes both open commands", async () => {
+		const cmds = await vscode.commands.getCommands(true);
+		assert.ok(
+			cmds.includes("mei-viewer.openPreview"),
+			"openPreview command should be registered",
+		);
+		assert.ok(
+			cmds.includes("mei-viewer.openPreviewToSide"),
+			"openPreviewToSide command should be registered",
+		);
+	});
+
 	test("opens custom editor for a .mei file", async () => {
 		// Create a temporary MEI file on disk
 		const tmpDir = os.tmpdir();
@@ -39,5 +51,15 @@ suite("MEI Viewer Integration", () => {
 			),
 		);
 		assert.strictEqual(hasCustom, true, "Custom editor tab should be open");
+	});
+
+	test("openPreviewToSide command executes without error", async () => {
+		const tmpDir = os.tmpdir();
+		const tmpFile = path.join(tmpDir, `mei-viewer-test-side-${Date.now()}.mei`);
+		const uri = vscode.Uri.file(tmpFile);
+		const content = `<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<mei xmlns=\"http://www.music-encoding.org/ns/mei\"><music/></mei>`;
+		await vscode.workspace.fs.writeFile(uri, Buffer.from(content, "utf8"));
+		await vscode.commands.executeCommand("mei-viewer.openPreviewToSide", uri);
+		assert.ok(true);
 	});
 });
