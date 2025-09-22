@@ -14,6 +14,7 @@ export class App {
 	private debounceUpdateTimer: number | null = null;
 	private resizeAttached = false;
 	private debug = false;
+	private projectOptions: Record<string, unknown> | null = null;
 
 	public bootstrap() {
 		if (document.readyState === "loading") {
@@ -77,7 +78,7 @@ export class App {
 		);
 		const unclamped = this.ui.scalePercent;
 		const scale = Math.max(20, Math.min(130, unclamped));
-		return {
+		const base = {
 			breaks: "smart",
 			pageWidth: (widthPx * 100) / scale,
 			pageHeight: (heightPx * 100) / scale,
@@ -85,7 +86,6 @@ export class App {
 			pageMarginBottom: (16 * 100) / scale,
 			pageMarginLeft: (30 * 100) / scale,
 			pageMarginRight: (20 * 100) / scale,
-			systemMaxPerPage: 24,
 			scaleToPageSize: false,
 			adjustPageHeight: false,
 			scale: scale,
@@ -109,6 +109,8 @@ export class App {
 			stemWidth: 0.3,
 			barLineWidth: 0.3,
 		};
+		// Merge in user-defined project options last, so they override defaults
+		return { ...base, ...(this.projectOptions || {}) };
 	}
 
 	private onMessage(event: MessageEvent) {
@@ -123,6 +125,7 @@ export class App {
 				return;
 			}
 			this.toolkit.setBaseUri(msg.moduleBaseUri || "");
+			this.projectOptions = msg.projectOptions ?? null;
 			if (
 				typeof msg.scalePercent === "number" &&
 				Number.isFinite(msg.scalePercent)
@@ -160,6 +163,12 @@ export class App {
 				});
 			this.ui.lastHighlightedXmlId = xmlIdStr || this.ui.lastHighlightedXmlId;
 			this.ui.applyHighlightByXmlId(this.ui.lastHighlightedXmlId);
+		} else if (msg.type === "setProjectOptions") {
+			this.projectOptions = msg.projectOptions ?? null;
+			if (this.lastMei) {
+				if (this.debug) console.log("[MEI] renderScore(setProjectOptions)");
+				this.renderScore(this.lastMei as string, undefined);
+			}
 		}
 	}
 
@@ -168,7 +177,7 @@ export class App {
 		if (!(raw instanceof Element)) return;
 		const hit =
 			(raw.closest(
-				"#prevPage, #nextPage, #toggleTheme",
+				"#prevPage, #nextPage, #toggleTheme, #openOptions",
 			) as HTMLElement | null) || (raw as HTMLElement | null);
 		const id = hit?.id || "";
 		if (id === "prevPage") {
@@ -182,6 +191,25 @@ export class App {
 			e.preventDefault();
 			e.stopPropagation();
 			return this.ui.onNextPage();
+		}
+		if (id === "openOptions") {
+			if (this.debug) console.log("[MEI] onClick -> openOptions");
+			e.preventDefault();
+			e.stopPropagation();
+			try {
+				const tk = this.toolkit.getToolkit();
+				type ToolWithGet = { getOptions?: () => Record<string, unknown> };
+				const maybe = tk as unknown as ToolWithGet | null;
+				const current =
+					maybe && typeof maybe.getOptions === "function"
+						? maybe.getOptions()
+						: {};
+				getVSCode()?.postMessage({
+					type: "openOptions",
+					currentOptions: current,
+				});
+			} catch {}
+			return;
 		}
 		// theme toggle removed
 	}

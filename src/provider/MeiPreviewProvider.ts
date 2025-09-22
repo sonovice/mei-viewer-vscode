@@ -1,13 +1,52 @@
 import * as vscode from "vscode";
+import * as vm from "node:vm";
+import * as path from "node:path";
 import { VIEW_TYPE_MEI_PREVIEW, KEY_SCALE_PERCENT } from "../constants";
 import type { WebviewOutboundMessage, InitMessage } from "../shared/messages";
 
 export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
+	// Track open panels mapped to their config URIs
+	private readonly panelRegistry: Map<string, Set<vscode.WebviewPanel>> =
+		new Map();
+
+	private trackPanel(panel: vscode.WebviewPanel, configUri: vscode.Uri) {
+		const key = configUri.toString();
+		let set = this.panelRegistry.get(key);
+		if (!set) {
+			set = new Set();
+			this.panelRegistry.set(key, set);
+		}
+		set.add(panel);
+	}
+
+	private untrackPanel(panel: vscode.WebviewPanel, configUri: vscode.Uri) {
+		const key = configUri.toString();
+		const set = this.panelRegistry.get(key);
+		if (!set) return;
+		set.delete(panel);
+		if (set.size === 0) this.panelRegistry.delete(key);
+	}
+
+	private async broadcastProjectOptions(configUri: vscode.Uri): Promise<void> {
+		try {
+			const opts = await this.loadProjectOptions(configUri);
+			const key = configUri.toString();
+			const targets = this.panelRegistry.get(key);
+			if (!targets) return;
+			for (const panel of targets) {
+				panel.webview.postMessage({
+					type: "setProjectOptions",
+					projectOptions: opts || undefined,
+				});
+			}
+		} catch {}
+	}
+
 	public static register(context: vscode.ExtensionContext): vscode.Disposable {
 		const provider = new MeiPreviewProvider(context);
-		return vscode.window.registerCustomEditorProvider(
+		const disp = vscode.window.registerCustomEditorProvider(
 			VIEW_TYPE_MEI_PREVIEW,
 			provider,
 			{
@@ -15,6 +54,21 @@ export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
 				supportsMultipleEditorsPerDocument: false,
 			},
 		);
+
+		// When any config JS file is saved, broadcast updates to all matching panels
+		const saveSub = vscode.workspace.onDidSaveTextDocument(async (doc) => {
+			try {
+				if (!doc || !doc.uri) return;
+				if (!/mei-viewer\.config\.js$/i.test(doc.uri.fsPath)) return;
+				await provider.broadcastProjectOptions(doc.uri);
+			} catch {}
+		});
+
+		context.subscriptions.push(saveSub);
+		return new vscode.Disposable(() => {
+			disp.dispose();
+			saveSub.dispose();
+		});
 	}
 
 	async openCustomDocument(uri: vscode.Uri): Promise<vscode.CustomDocument> {
@@ -66,6 +120,24 @@ export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
 
 		const textDoc = await vscode.workspace.openTextDocument(document.uri);
 
+		// Determine config file path for this document
+		const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+		const configUri = workspaceFolder
+			? vscode.Uri.joinPath(
+					workspaceFolder.uri,
+					".vscode",
+					"mei-viewer.config.js",
+				)
+			: vscode.Uri.file(
+					path.join(
+						path.dirname(document.uri.fsPath),
+						".vscode",
+						"mei-viewer.config.js",
+					),
+				);
+		const projectOptions = await this.loadProjectOptions(configUri);
+		this.trackPanel(webviewPanel, configUri);
+
 		let didInit = false;
 		const postInit = () => {
 			if (didInit || isDisposed) return;
@@ -86,6 +158,7 @@ export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
 				debugLogging: !!vscode.workspace
 					.getConfiguration("meiViewer")
 					.get("enableDebugLogging", false),
+				projectOptions: projectOptions || undefined,
 			};
 			webview.postMessage(initMsg);
 		};
@@ -150,6 +223,13 @@ export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
 					if (Number.isFinite(scale)) {
 						await this.context.globalState.update(KEY_SCALE_PERCENT, scale);
 					}
+				} else if (e.type === "openOptions") {
+					type OpenOpts = {
+						type: "openOptions";
+						currentOptions?: Record<string, unknown>;
+					};
+					const oo = e as OpenOpts;
+					await this.openOptionsFile(configUri, oo.currentOptions);
 				}
 			},
 		);
@@ -175,15 +255,279 @@ export class MeiPreviewProvider implements vscode.CustomReadonlyEditorProvider {
 			}
 		});
 
+		// Watch the project options config file for changes
+		let optionsWatcher: vscode.FileSystemWatcher | undefined;
+		try {
+			if (workspaceFolder) {
+				optionsWatcher = vscode.workspace.createFileSystemWatcher(
+					new vscode.RelativePattern(
+						workspaceFolder,
+						vscode.workspace.asRelativePath(configUri, false),
+					),
+				);
+				const postOptions = async () => {
+					const opts = await this.loadProjectOptions(configUri);
+					webview.postMessage({
+						type: "setProjectOptions",
+						projectOptions: opts || undefined,
+					});
+				};
+				optionsWatcher.onDidChange(postOptions);
+				optionsWatcher.onDidCreate(postOptions);
+				optionsWatcher.onDidDelete(async () => {
+					webview.postMessage({
+						type: "setProjectOptions",
+						projectOptions: undefined,
+					});
+				});
+			}
+		} catch {}
+
 		webviewPanel.onDidDispose(() => {
 			isDisposed = true;
 			clearTimeout(initFallback);
 			readyListener.dispose();
 			changeSub.dispose();
 			selectionSub.dispose();
+			optionsWatcher?.dispose();
+			this.untrackPanel(webviewPanel, configUri);
 		});
 	}
 }
+
+async function ensureDir(uri: vscode.Uri): Promise<void> {
+	try {
+		await vscode.workspace.fs.createDirectory(uri);
+	} catch {}
+}
+
+async function fileExists(uri: vscode.Uri): Promise<boolean> {
+	try {
+		await vscode.workspace.fs.stat(uri);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function generateJsConfigContent(
+	extUri: vscode.Uri,
+	currentOptions: Record<string, unknown> | undefined,
+): Promise<Uint8Array> {
+	const header = `// MEI Viewer / Verovio options
+// This file defines project-level options for the Verovio toolkit.
+// It is loaded by the MEI Viewer extension if present.
+//
+// Export either an object or a function returning an object.
+// The returned keys are passed to VerovioToolkit.setOptions().
+//
+// Lines starting with // are examples and will be ignored.
+// Remove // to enable an option and set its value.
+\n`;
+
+	let dtsText = "";
+	try {
+		const dtsUri = vscode.Uri.joinPath(
+			extUri,
+			"node_modules",
+			"@types",
+			"verovio",
+			"VerovioOptions.d.ts",
+		);
+		const buff = await vscode.workspace.fs.readFile(dtsUri);
+		dtsText = Buffer.from(buff).toString("utf8");
+	} catch {}
+
+	type Entry = {
+		name: string;
+		doc: string;
+		meta: { default?: string; min?: string; max?: string };
+	};
+	const entries: Entry[] = [];
+	const excluded = new Set<string>([
+		"pageWidth",
+		"pageHeight",
+		"pageMarginTop",
+		"pageMarginBottom",
+		"pageMarginLeft",
+		"pageMarginRight",
+		"scaleToPageSize",
+		"adjustPageHeight",
+		"scale",
+	]);
+	if (dtsText) {
+		// Capture only the JSDoc body (group 1) and the following property name (group 2)
+		const re = /\/\*\*([\s\S]*?)\*\/\s*([a-zA-Z0-9_]+)\?:/g;
+		while (true) {
+			const m = re.exec(dtsText);
+			if (!m) break;
+			const blockDoc = m[1];
+			const name = m[2];
+			const lines = blockDoc
+				.split("\n")
+				.map((l) => l.replace(/^\s*\*\s?/, "").trim());
+			const docLines = lines.filter((l) => !/^(default|min|max)\s*:/i.test(l));
+			const doc = docLines.join(" ").trim();
+			const meta: Entry["meta"] = {};
+			const def = blockDoc.match(/default:\s*([^\n*]+)/i);
+			const min = blockDoc.match(/min:\s*([^\n*]+)/i);
+			const max = blockDoc.match(/max:\s*([^\n*]+)/i);
+			if (def) meta.default = def[1].trim();
+			if (min) meta.min = min[1].trim();
+			if (max) meta.max = max[1].trim();
+			if (!excluded.has(name)) entries.push({ name, doc, meta });
+		}
+	}
+
+	const current = currentOptions ?? {};
+	const lines: string[] = [];
+	for (const e of entries) {
+		if (e.doc) lines.push(`  // ${e.doc}`);
+		const metaBits = [
+			e.meta.default ? `default: ${e.meta.default}` : "",
+			e.meta.min ? `min: ${e.meta.min}` : "",
+			e.meta.max ? `max: ${e.meta.max}` : "",
+		].filter(Boolean);
+		if (metaBits.length) lines.push(`  // ${metaBits.join("; ")}`);
+		if (Object.hasOwn(current, e.name)) {
+			lines.push(
+				`  ${e.name}: ${JSON.stringify((current as Record<string, unknown>)[e.name])},`,
+			);
+		} else {
+			lines.push(`  // ${e.name}: /* set value here */,`);
+		}
+		lines.push("");
+	}
+
+	// Fallback: if no entries parsed, just dump current options
+	if (!entries.length) {
+		const body = `
+/**
+ * @returns {import('@types/verovio/VerovioOptions').VerovioOptions}
+ */
+module.exports = function getVerovioOptions() {
+  return ${JSON.stringify(
+		Object.fromEntries(
+			Object.entries(currentOptions ?? {}).filter(([k]) => !excluded.has(k)),
+		),
+		null,
+		2,
+	)};
+}
+`;
+		return new TextEncoder().encode(header + body);
+	}
+
+	const body = `
+/**
+ * @returns {import('@types/verovio/VerovioOptions').VerovioOptions}
+ */
+module.exports = function getVerovioOptions() {
+  return {
+${lines.join("\n")}
+  };
+}
+`;
+	return new TextEncoder().encode(header + body);
+}
+
+async function readJsModuleExport(uri: vscode.Uri): Promise<unknown> {
+	const srcBuff = await vscode.workspace.fs.readFile(uri);
+	let src = Buffer.from(srcBuff).toString("utf8");
+	// Allow ESM default export by a minimal transform to CommonJS for vm
+	if (/\bexport\s+default\s+/.test(src)) {
+		src = src.replace(/\bexport\s+default\s+/g, "module.exports = ");
+	}
+	const sandbox: Record<string, unknown> = {
+		module: { exports: {} },
+		exports: {},
+	};
+	const context = vm.createContext(sandbox);
+	const script = new vm.Script(src, { filename: uri.fsPath });
+	script.runInContext(context);
+	const mod = sandbox.module as { exports: unknown };
+	const exp =
+		(mod && (mod as { exports?: unknown }).exports) ?? sandbox.exports;
+	if (exp && typeof (exp as { default?: unknown }).default === "function") {
+		return (exp as { default: () => unknown }).default();
+	}
+	return typeof exp === "function" ? (exp as () => unknown)() : exp;
+}
+
+// Reserved for future support of JSON/JSONC config files
+// async function readJsonc(uri: vscode.Uri): Promise<unknown> {
+//     try {
+//         const buff = await vscode.workspace.fs.readFile(uri);
+//         const text = Buffer.from(buff).toString("utf8");
+//         return JSON.parse(text);
+//     } catch {
+//         return undefined;
+//     }
+// }
+
+// Load project options from config JS in .vscode. Supports default export or module.exports.
+const _loadProjectOptions = async function (
+	this: MeiPreviewProvider,
+	configUri: vscode.Uri,
+): Promise<Record<string, unknown> | null> {
+	try {
+		if (!(await fileExists(configUri))) return null;
+		const val = (await readJsModuleExport(configUri)) as unknown;
+		if (val && typeof val === "object") return val as Record<string, unknown>;
+		return null;
+	} catch (err) {
+		console.warn("[MEI] Failed to read project options:", err);
+		return null;
+	}
+};
+
+const _openOptionsFile = async function (
+	this: MeiPreviewProvider,
+	configUri: vscode.Uri,
+	currentOptions: Record<string, unknown> | undefined,
+): Promise<void> {
+	const dirUri = vscode.Uri.joinPath(configUri, ".." as unknown as string);
+	await ensureDir(dirUri);
+	if (!(await fileExists(configUri))) {
+		const ext = vscode.extensions.getExtension("simon-waloschek.mei-viewer");
+		const extUri =
+			ext?.extensionUri ?? vscode.Uri.file(path.dirname(__dirname));
+		await vscode.workspace.fs.writeFile(
+			configUri,
+			await generateJsConfigContent(extUri, currentOptions),
+		);
+	}
+	const doc = await vscode.workspace.openTextDocument(configUri);
+	await vscode.window.showTextDocument(doc, { preview: false });
+};
+
+// Typing augmentation on the prototype for local helpers
+declare module "../provider/MeiPreviewProvider" {
+	interface MeiPreviewProvider {
+		loadProjectOptions(
+			configUri: vscode.Uri,
+		): Promise<Record<string, unknown> | null>;
+		openOptionsFile(
+			configUri: vscode.Uri,
+			currentOptions: Record<string, unknown> | undefined,
+		): Promise<void>;
+	}
+}
+
+// Attach helpers without using `any` assertion
+(
+	MeiPreviewProvider.prototype as unknown as {
+		loadProjectOptions: typeof _loadProjectOptions;
+		openOptionsFile: typeof _openOptionsFile;
+	}
+).loadProjectOptions = _loadProjectOptions;
+
+(
+	MeiPreviewProvider.prototype as unknown as {
+		loadProjectOptions: typeof _loadProjectOptions;
+		openOptionsFile: typeof _openOptionsFile;
+	}
+).openOptionsFile = _openOptionsFile;
 
 function getNonce() {
 	const possible =

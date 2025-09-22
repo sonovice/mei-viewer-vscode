@@ -4,6 +4,7 @@ export type InitMessage = {
 	moduleBaseUri?: string;
 	scalePercent?: number;
 	debugLogging?: boolean;
+	projectOptions?: Record<string, unknown>;
 };
 
 export type UpdateMessage = {
@@ -21,6 +22,16 @@ export type PersistSettingsMessage = {
 	scalePercent?: number;
 };
 
+export type SetProjectOptionsMessage = {
+	type: "setProjectOptions";
+	projectOptions?: Record<string, unknown>;
+};
+
+export type OpenOptionsMessage = {
+	type: "openOptions";
+	currentOptions?: Record<string, unknown>;
+};
+
 export type ElementClickedMessage = {
 	type: "elementClicked";
 	xmlId?: string;
@@ -31,8 +42,10 @@ export type ReadyMessage = { type: "ready" };
 export type WebviewInboundMessage =
 	| InitMessage
 	| UpdateMessage
-	| HighlightMessage;
+	| HighlightMessage
+	| SetProjectOptionsMessage;
 export type WebviewOutboundMessage =
 	| PersistSettingsMessage
 	| ElementClickedMessage
-	| ReadyMessage;
+	| ReadyMessage
+	| OpenOptionsMessage;

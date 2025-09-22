@@ -9,6 +9,7 @@ export type VerovioToolkitType = {
 	setOptions: (opts: Record<string, unknown>) => void;
 	loadData: (mei: string) => void;
 	renderToSVG: (page: number) => string;
+	getOptions?: () => Record<string, unknown>;
 	getPageCount: () => number;
 	getPageWithElement?: (xmlId: string) => number;
 };
