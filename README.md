@@ -1,6 +1,12 @@
 # MEI Viewer
 
-Live preview of MEI files rendered with Verovio.
+Live preview in VS Code of MEI files rendered with Verovio.
+
+[![License](https://img.shields.io/github/license/sonovice/mei-viewer-vscode)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/sonovice/mei-viewer-vscode?display_name=tag)](https://github.com/sonovice/mei-viewer-vscode/releases)
+
+
+![MEI Viewer](res/header.png)
 
 ## Features
 
