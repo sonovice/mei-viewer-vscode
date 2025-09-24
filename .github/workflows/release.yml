@@ -8,23 +8,22 @@ permissions:
   contents: write
 
 jobs:
-  detect-version:
-    name: Detect version change
+  release:
+    name: Build and Tag Release
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    outputs:
-      changed: ${{ steps.tagcheck.outputs.changed }}
-      version: ${{ steps.parse.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Parse version from package.json
         id: parse
         run: |
           set -e
           CURR=$(grep -m1 '"version":' package.json | sed -E 's/.*"version":\s*"([^"]+)".*/\1/')
           echo "version=$CURR" >> $GITHUB_OUTPUT
+
       - name: Check if tag already exists
         id: tagcheck
         run: |
@@ -39,24 +38,24 @@ jobs:
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
-  build-vsix:
-    if: needs.detect-version.outputs.changed == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: detect-version
-    name: Build VSIX
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - name: Setup Node
+        if: ${{ steps.tagcheck.outputs.changed == 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
       - name: Setup Bun
+        if: ${{ steps.tagcheck.outputs.changed == 'true' }}
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.2.22
+
       - name: Install dependencies
+        if: ${{ steps.tagcheck.outputs.changed == 'true' }}
         run: bun install --frozen-lockfile
+
       - name: Package VSIX
+        if: ${{ steps.tagcheck.outputs.changed == 'true' }}
         id: package
         run: |
           set -e
@@ -64,32 +63,21 @@ jobs:
           bun run package:vsix
           VSIX_PATH="$(ls *.vsix | head -n1)"
           echo "vsix_path=$VSIX_PATH" >> $GITHUB_OUTPUT
+
       - name: Upload VSIX artifact
+        if: ${{ steps.tagcheck.outputs.changed == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: vsix
           path: ${{ steps.package.outputs.vsix_path }}
 
-  release:
-    if: needs.detect-version.outputs.changed == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [build-vsix, detect-version]
-    name: Tag version
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository for tagging
-        uses: actions/checkout@v4
+      - name: Create GitHub Release with VSIX
+        if: ${{ steps.tagcheck.outputs.changed == 'true' }}
+        uses: softprops/action-gh-release@v2
         with:
-          fetch-depth: 0
-      - name: Create and push version tag
-        run: |
-          set -e
-          VER="v${{ needs.detect-version.outputs.version }}"
-          git fetch --tags --quiet
-          if git rev-parse -q --verify "refs/tags/$VER" >/dev/null; then
-            echo "Tag $VER already exists, skipping push"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag -a "$VER" -m "Release $VER" "${{ github.sha }}"
-            git push origin "refs/tags/$VER"
-          fi
+          tag_name: v${{ steps.parse.outputs.version }}
+          name: v${{ steps.parse.outputs.version }}
+          prerelease: false
+          target_commitish: ${{ github.sha }}
+          files: |
+            ${{ steps.package.outputs.vsix_path }}
