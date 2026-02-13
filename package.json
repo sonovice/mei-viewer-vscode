@@ -50,6 +50,13 @@
         ]
       }
     ],
+    "grammars": [
+      {
+        "language": "mei",
+        "scopeName": "text.xml.mei",
+        "path": "./syntaxes/mei.tmLanguage.json"
+      }
+    ],
     "customEditors": [
       {
         "viewType": "mei-viewer.meiPreview",

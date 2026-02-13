@@ -1,0 +1,8 @@
+{
+	"scopeName": "text.xml.mei",
+	"patterns": [
+		{
+			"include": "text.xml"
+		}
+	]
+}
