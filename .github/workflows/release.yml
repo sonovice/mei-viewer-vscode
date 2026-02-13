@@ -72,12 +72,24 @@ jobs:
           name: vsix
           path: ${{ steps.package.outputs.vsix_path }}
 
+      - name: Extract release notes from CHANGELOG
+        if: ${{ steps.tagcheck.outputs.changed == 'true' }}
+        id: notes
+        run: |
+          set -e
+          VER="${{ steps.parse.outputs.version }}"
+          # Extract the section between this version header and the next version header
+          BODY=$(awk "/^## \\[$VER\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
+          # Write to a file to preserve newlines
+          echo "$BODY" > /tmp/release-notes.md
+
       - name: Create GitHub Release with VSIX
         if: ${{ steps.tagcheck.outputs.changed == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.parse.outputs.version }}
           name: v${{ steps.parse.outputs.version }}
+          body_path: /tmp/release-notes.md
           prerelease: false
           target_commitish: ${{ github.sha }}
           files: |
