@@ -87,7 +87,7 @@ export class App {
 			pageMarginLeft: (30 * 100) / scale,
 			pageMarginRight: (20 * 100) / scale,
 			scaleToPageSize: false,
-			adjustPageHeight: false,
+			adjustPageHeight: true,
 			scale: scale,
 
 			footer: "none",

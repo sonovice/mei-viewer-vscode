@@ -67,6 +67,8 @@ export class UiController {
 		this.container.innerHTML = svg;
 		const svgRoot = this.container.querySelector("svg");
 		if (svgRoot) {
+			// Expand SVG to fit all content (Verovio may clip to pageHeight)
+			this.expandSvgToContent(svgRoot as SVGSVGElement);
 			// Ensure we don't accumulate multiple listeners after re-renders
 			(svgRoot as SVGSVGElement).removeEventListener(
 				"click",
@@ -109,6 +111,47 @@ export class UiController {
 			);
 			// Ensure dynamic stylesheet exists (for cursor and highlight styles)
 			this.ensureDynamicStyle(0);
+		}
+	}
+
+	private expandSvgToContent(svgRoot: SVGSVGElement) {
+		try {
+			// Verovio nests content inside an inner <svg class="definition-scale">
+			// whose viewBox may clip content that extends beyond pageHeight.
+			const innerSvg = svgRoot.querySelector(
+				"svg.definition-scale",
+			) as SVGSVGElement | null;
+			if (!innerSvg) return;
+
+			const vb = innerSvg.getAttribute("viewBox");
+			if (!vb) return;
+			const parts = vb.split(/[\s,]+/).map(Number);
+			if (parts.length !== 4) return;
+			const [vbX, vbY, vbW, vbH] = parts;
+
+			// getBBox on the inner SVG returns content bounds in viewBox coordinates
+			const bbox = innerSvg.getBBox();
+			const contentBottom = Math.ceil(bbox.y + bbox.height);
+
+			if (contentBottom > vbH) {
+				// Expand the inner SVG's viewBox to fit all content
+				innerSvg.setAttribute(
+					"viewBox",
+					`${vbX} ${vbY} ${vbW} ${contentBottom}`,
+				);
+
+				// Scale the outer SVG's pixel height proportionally
+				const outerHeight =
+					Number(svgRoot.getAttribute("height")?.replace("px", "")) || 0;
+				if (outerHeight > 0 && vbH > 0) {
+					const newOuterHeight = Math.ceil(
+						outerHeight * (contentBottom / vbH),
+					);
+					svgRoot.setAttribute("height", `${newOuterHeight}px`);
+				}
+			}
+		} catch {
+			// getBBox may fail if SVG is not yet laid out
 		}
 	}
 

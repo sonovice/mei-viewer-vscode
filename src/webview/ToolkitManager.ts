@@ -33,7 +33,7 @@ export class ToolkitManager {
 			this.toolkit = new VerovioToolkit(VerovioModule);
 			this.toolkit.setOptions({
 				scaleToPageSize: false,
-				adjustPageHeight: false,
+				adjustPageHeight: true,
 				mmOutput: false,
 				svgBoundingBoxes: false,
 			});
