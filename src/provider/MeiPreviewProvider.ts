@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { VIEW_TYPE_MEI_PREVIEW, KEY_SCALE_PERCENT } from "../constants";
 import type { WebviewOutboundMessage, InitMessage } from "../shared/messages";
 
@@ -12,7 +13,7 @@ async function importYaml(): Promise<{
 		// dist/host/provider/ -> dist/host/vendor/yaml.mjs
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		const mod: any = await import(
-			path.join(__dirname, "..", "vendor", "yaml.mjs")
+			pathToFileURL(path.join(__dirname, "..", "vendor", "yaml.mjs")).href
 		);
 		const y = mod && (mod.default ?? mod);
 		if (y?.parse && y?.stringify)
