@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   release:
@@ -81,3 +82,81 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: |
             ${{ steps.package.outputs.vsix_path }}
+
+      - name: Publish to VS Code Marketplace
+        id: vsce
+        if: ${{ steps.tagcheck.outputs.changed == 'true' }}
+        continue-on-error: true
+        run: npx @vscode/vsce publish --packagePath ${{ steps.package.outputs.vsix_path }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Open VSX
+        id: ovsx
+        if: ${{ steps.tagcheck.outputs.changed == 'true' }}
+        continue-on-error: true
+        run: npx ovsx publish ${{ steps.package.outputs.vsix_path }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
+      - name: Create issue on publish failure
+        if: ${{ steps.tagcheck.outputs.changed == 'true' && (steps.vsce.outcome == 'failure' || steps.ovsx.outcome == 'failure') }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failed = [];
+            if ('${{ steps.vsce.outcome }}' === 'failure') failed.push('VS Code Marketplace (`VSCE_PAT`)');
+            if ('${{ steps.ovsx.outcome }}' === 'failure') failed.push('Open VSX (`OVSX_PAT`)');
+            const version = '${{ steps.parse.outputs.version }}';
+            const title = `Publishing v${version} failed – token(s) likely expired`;
+            const body = [
+              `The release pipeline for **v${version}** built and tagged successfully, but publishing failed for:`,
+              '',
+              ...failed.map(f => `- ${f}`),
+              '',
+              '### How to fix',
+              '1. Renew the expired token(s):',
+              '   - **VSCE_PAT**: [Azure DevOps → Personal access tokens](https://dev.azure.com) (scope: *Marketplace → Manage*)',
+              '   - **OVSX_PAT**: [Open VSX → Settings → Access Tokens](https://open-vsx.org)',
+              '2. Update the secret(s) in [repository settings](https://github.com/${{ github.repository }}/settings/secrets/actions)',
+              '3. Re-run the [failed workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})',
+              '',
+              `The VSIX is still available as a [GitHub release](https://github.com/${{ github.repository }}/releases/tag/v${version}) and can be published manually with:`,
+              '```',
+              `npx @vscode/vsce publish --packagePath mei-viewer-${version}.vsix`,
+              `npx ovsx publish mei-viewer-${version}.vsix`,
+              '```',
+            ].join('\n');
+
+            // Avoid duplicates: check for an existing open issue with the same title
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'ci',
+            });
+            if (existing.some(i => i.title === title)) {
+              console.log('Issue already exists, skipping creation');
+              return;
+            }
+
+            // Ensure the "ci" label exists
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'ci',
+                color: 'e6553a',
+                description: 'CI/CD pipeline issues',
+              });
+            } catch (e) {
+              // Label already exists, ignore
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['ci'],
+            });
